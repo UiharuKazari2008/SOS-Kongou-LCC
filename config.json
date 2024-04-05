@@ -1,0 +1,21 @@
+{
+  "bookcase_dir": "S:\\",
+  "system_dir": "C:\\SEGA\\system\\",
+  "preboot_dir": "C:\\SEGA\\system\\preboot\\",
+  "ramdisk_dir": "R:\\",
+  "drivers": {
+    "network": "haruna_network.exe",
+    "network_overlay": "HarunaOverlay\\HarunaOverlay.exe"
+  },
+  "scripts": {
+    "prepare": "prepare.ps1",
+    "pre_exec": "pre_exec.ps1",
+    "cleanup": "cleanup.ps1",
+    "shutdown": "shutdown.ps1",
+    "network_install": "net_prepare.ps1",
+    "network_remove": "net_cleanup.ps1"
+  },
+  "config": {
+    "network": "C:\\SEGA\\system\\net_config.json"
+  }
+}

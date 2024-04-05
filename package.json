@@ -1,0 +1,29 @@
+{
+  "name": "sos-kongou-lcc",
+  "version": "1.0.0",
+  "description": "",
+  "main": "lcc.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/UiharuKazari2008/SOS-Kongou-LCC.git"
+  },
+  "private": true,
+  "dependencies": {
+    "express": "^4.19.2",
+    "request": "^2.88.2"
+  },
+  "bin": "lcc.js",
+  "pkg": {
+    "scripts": [
+      "lcc.js"
+    ],
+    "output": "kongou_lifecycle_ctrl",
+    "targets": [
+      "node18-win-x64"
+    ],
+    "outputPath": "build/"
+  }
+}
