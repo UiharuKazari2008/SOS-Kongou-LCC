@@ -1,8 +1,11 @@
 const express = require('express');
 const request = require('request');
 const fs = require('fs');
+const { spawn } = require('child_process');
+const { PowerShell } = require("node-powershell");
 let config = {}
 const {resolve, join} = require("path");
+const {md5} = require("request/lib/helpers");
 let state = {}
 
 const app = express();
@@ -11,6 +14,18 @@ const port = 6799;
 app.set('view engine', 'pug');
 app.use('/static', express.static('./public'));
 
+const ps = new PowerShell({
+    executableOptions: {
+        '-ExecutionPolicy': 'Bypass',
+        '-NoProfile': true,
+    },
+});
+const psUtility = new PowerShell({
+    executableOptions: {
+        '-ExecutionPolicy': 'Bypass',
+        '-NoProfile': true,
+    },
+});
 (() => {
     try {
         if (fs.existsSync('./config.json')) {
@@ -83,8 +98,8 @@ function getCurrentBookcase() {
     }
 }
 
-function generateIonaConfig() {
-    const current_bc = getCurrentBookcase();
+function generateIonaConfig(data = undefined) {
+    const current_bc = (data || getCurrentBookcase());
     if (current_bc) {
         let _publish_config = {
             verbose: state.enable_verbose || false,
@@ -217,6 +232,45 @@ app.get("/lcc/bookcase/set", (req, res) => {
     }
 });
 
+app.get("/lcc/bookcase/mount", async (req, res) => {
+    try {
+        const keychipPath = resolve(join(config.system_dir, config.drivers.keychip));
+        const ionaBootJsonPath = resolve(join(config.ramdisk_dir, "\\iona.boot.json"));
+
+        // Launching the executable in a new window
+        const childProcess = spawn('start', ['minimized', keychipPath, '--env', ionaBootJsonPath, '--editMode'], {
+            detached: true,
+            stdio: 'ignore',
+            shell: true
+        });
+
+        childProcess.unref(); // Allow the parent process to exit independently
+        res.status(200).send("Mounting Disks");
+    } catch (error) {
+        console.error(error);
+        res.status(500).send(error.message);
+    }
+});
+app.get("/lcc/bookcase/eject", async (req, res) => {
+    try {
+        const keychipPath = resolve(join(config.system_dir, config.drivers.keychip));
+        const ionaBootJsonPath = resolve(join(config.ramdisk_dir, "\\iona.boot.json"));
+
+        // Launching the executable in a new window
+        const childProcess = spawn('start', ['minimized', keychipPath, '--env', ionaBootJsonPath, '--shutdown'], {
+            detached: true,
+            stdio: 'ignore',
+            shell: true
+        });
+
+        childProcess.unref(); // Allow the parent process to exit independently
+        res.status(200).send("Ejecting Disks");
+    } catch (error) {
+        console.error(error);
+        res.status(500).send(error.message);
+    }
+});
+
 app.get("/lcc/network/state", (req, res) => {
     res.status(200).send((!(state['disable_networking'])).toString())
 });
@@ -257,6 +311,47 @@ app.get("/lcc/overlay/state/:set", (req, res) => {
         state: !(state['disable_overlay']),
         message: "Saved Overlay Setting",
     })
+});
+
+app.get("/lce/kongou", (req, res) => {
+    const bookcase = getCurrentBookcase();
+    const current_bc = generateIonaConfig(bookcase);
+    let name = ""
+    name += ((current_bc.id) ? (current_bc.id.toString() + " // ") : "")
+    name += ((bookcase.name) ? bookcase.name : bookcase.id) + " // "
+    name += ((current_bc.software_mode) ? "Software Key" : "Hardware Key")
+    name += ((current_bc.login_key && current_bc.login_iv) ? " // Auth Hash: " + md5(current_bc.login_key + current_bc.login_iv) : "")
+    name += ((current_bc.runtime_modify_option) ? " // Sys Arg: " + current_bc.runtime_modify_option : "")
+    name += ((current_bc.network_driver) ? " // Haruna Global Matching" : "")
+
+    res.status(200).send(name)
+})
+app.get("/lce/kongou/start", async (req, res) => {
+    try {
+        const keychipPath = resolve(join(config.system_dir, config.drivers.keychip));
+        const ionaBootJsonPath = resolve(join(config.ramdisk_dir, "\\iona.boot.json"));
+        const displayStatePath = resolve(join(config.preboot_dir, "\\preboot_Data\\StreamingAssets", "\\state.txt"));
+        const configStatePath = resolve(join(config.preboot_dir, "\\preboot_Data\\StreamingAssets", "\\current_config.txt"));
+        const configErrorsPath = resolve(join(config.preboot_dir, "\\preboot_Data\\StreamingAssets", "\\config_errors.txt"));
+
+        // Launching the executable in a new window
+        const childProcess = spawn('start', ['minimized', keychipPath,
+            '--env', ionaBootJsonPath,
+            '--displayState', displayStatePath,
+            '--configState', configStatePath,
+            '--configErrors', configErrorsPath
+        ], {
+            detached: true,
+            stdio: 'ignore',
+            shell: true
+        });
+
+        childProcess.unref(); // Allow the parent process to exit independently
+        res.status(200).send("Boot Started");
+    } catch (error) {
+        console.error(error);
+        res.status(500).send(error.message);
+    }
 });
 
 app.get("/lce/iona/config.json", (req, res) => {

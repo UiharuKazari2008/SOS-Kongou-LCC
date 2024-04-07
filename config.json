@@ -4,6 +4,7 @@
   "preboot_dir": "C:\\SEGA\\system\\preboot\\",
   "ramdisk_dir": "R:\\",
   "drivers": {
+    "keychip": "savior_of_song_keychip.exe",
     "network": "haruna_network.exe",
     "network_overlay": "HarunaOverlay\\HarunaOverlay.exe"
   },
@@ -16,6 +17,9 @@
     "network_remove": "net_cleanup.ps1"
   },
   "config": {
+    "keychip": {
+
+    },
     "network": "C:\\SEGA\\system\\net_config.json"
   }
 }
