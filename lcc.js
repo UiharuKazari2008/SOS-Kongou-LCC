@@ -45,6 +45,10 @@ const psUtility = new PowerShell({
     }
 })()
 
+setInterval(() => {
+    process.title = `ARS NOVA KONGOU Lifecycle Controller`;
+}, 100);
+
 async function saveState() {
     try {
         fs.writeFileSync(config.state_file || './state.json', JSON.stringify(state, undefined, 1), {
@@ -258,7 +262,9 @@ async function startLifecycle() {
 async function stopLifecycle() {
     if (application_armed) {
         await new Promise((ok) => {
-            request(`http://localhost:6789/terminate`, async (error, response, body) => {
+            request(`http://localhost:6789/terminate`, {
+                timeout: 15000
+            },async (error, response, body) => {
                 if (!error && response.statusCode === 200)
                     console.log("Keychip Response: " + body.toString());
                 ok();
@@ -360,7 +366,7 @@ app.get("/lcc/bookcase/mount", async (req, res) => {
         const ionaBootJsonPath = resolve(join(config.ramdisk_dir, "\\iona.boot.json"));
 
         // Launching the executable in a new window
-        const childProcess = spawn('start', ['minimized', keychipPath, '--env', ionaBootJsonPath, '--editMode'], {
+        const childProcess = spawn(keychipPath, ['--env', ionaBootJsonPath, '--editMode'], {
             detached: true,
             stdio: 'ignore',
             shell: true
@@ -379,7 +385,7 @@ app.get("/lcc/bookcase/eject", async (req, res) => {
         const ionaBootJsonPath = resolve(join(config.ramdisk_dir, "\\iona.boot.json"));
 
         // Launching the executable in a new window
-        const childProcess = spawn('start', ['minimized', keychipPath, '--env', ionaBootJsonPath, '--shutdown'], {
+        const childProcess = spawn(keychipPath, [keychipPath, '--env', ionaBootJsonPath, '--shutdown'], {
             detached: true,
             stdio: 'ignore',
             shell: true
@@ -614,5 +620,5 @@ app.get("/lce/ramdisk/write/haruna", (req, res) => {
 });
 
 app.listen(port, () => {
-    console.log(`Kongou Lifecycle Server is port ${port}`);
+
 });
