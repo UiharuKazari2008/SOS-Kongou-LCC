@@ -1,9 +1,11 @@
 const express = require('express');
 const request = require('request');
 const fs = require('fs');
-const { spawn } = require('child_process');
+const {release, tmpdir} = require("os");
+const { snapshot } = require("process-list");
+const { spawn, exec} = require('child_process');
 const { PowerShell } = require("node-powershell");
-let config = {}
+let config = {};
 const {resolve, join} = require("path");
 const {md5} = require("request/lib/helpers");
 let state = {}
@@ -75,6 +77,13 @@ function getCurrentBookcase() {
     try {
         const bookcases = JSON.parse(fs.readFileSync(config.bookcase_file || './bookcase.json').toString());
         if (bookcases.shelfs && bookcases.shelfs[state.select_bookcase]) {
+            let keystore_values = undefined;
+            if (bookcases.shelfs[state.select_bookcase].keychain !== undefined && config.config && config.config.use_keystore) {
+                const keystore = JSON.parse(fs.readFileSync(config.keystore_file || './keystore.json').toString());
+                if (keystore && keystore.keychain && keystore.keychain.length > 0  && keystore.keychain[bookcases.shelfs[state.select_bookcase].keychain]) {
+                    keystore_values = keystore.keychain[bookcases.shelfs[state.select_bookcase].keychain];
+                }
+            }
             return {
                 bookcase_dir: config.bookcase_dir,
                 key: state.select_bookcase,
@@ -87,6 +96,7 @@ function getCurrentBookcase() {
                 network_overlay: (config.drivers && config.drivers.network_overlay) ? ((config.drivers.network_overlay.includes(':\\')) ? config.drivers.network_overlay : join(config.system_dir, config.drivers.network_overlay)) : undefined,
                 network_start_script: (config.scripts && config.scripts.network_install) ? ((config.scripts.network_install.includes(':\\')) ? config.scripts.network_install : join(config.system_dir, config.scripts.network_install)) : undefined,
                 network_stop_script: (config.scripts && config.scripts.network_remove) ? ((config.scripts.network_remove.includes(':\\')) ? config.scripts.network_remove : join(config.system_dir, config.scripts.network_remove)) : undefined,
+                keystore: keystore_values || undefined,
                 ...bookcases.shelfs[state.select_bookcase]
             }
         } else {
@@ -102,9 +112,11 @@ function generateIonaConfig(data = undefined) {
     const current_bc = (data || getCurrentBookcase());
     if (current_bc) {
         let _publish_config = {
+            lifecycle_controller: true,
+            debug: state.enable_debugger || false,
             verbose: state.enable_verbose || false,
-            login_key: (current_bc.auth && current_bc.auth.key) ? current_bc.auth.key : (current_bc.login && current_bc.login.key) ? current_bc.login.key : undefined,
-            login_iv: (current_bc.auth && current_bc.auth.iv) ? current_bc.auth.iv : (current_bc.login && current_bc.login.iv) ? current_bc.login.iv : undefined,
+            login_key: (current_bc.keystore && current_bc.keystore.key) ? current_bc.keystore.key : (current_bc.auth && current_bc.auth.key) ? current_bc.auth.key : (current_bc.login && current_bc.login.key) ? current_bc.login.key : undefined,
+            login_iv: (current_bc.keystore && current_bc.keystore.iv) ? current_bc.keystore.iv : (current_bc.auth && current_bc.auth.iv) ? current_bc.auth.iv : (current_bc.login && current_bc.login.iv) ? current_bc.login.iv : undefined,
             id: (current_bc.config && current_bc.config.id) ? current_bc.config.id.toString() : undefined,
             ini: (current_bc.config && current_bc.config.ini) ? current_bc.config.ini.toString() : (!current_bc.no_app_ini) ? "Y:\\segatools.ini" : undefined,
             app: (current_bc.books && current_bc.books.application) ? resolve(join(current_bc.bookcase_dir, `\\${current_bc.book_dir}\\${current_bc.books.application}`)) : undefined,
@@ -142,6 +154,18 @@ function generateIonaConfig(data = undefined) {
             _publish_config.option_delta = false;
             _publish_config.runtime_delta = false;
         }
+        if (config.config && config.config.keychip) {
+            if (config.config.keychip.software_key !== undefined) {
+                _publish_config.softwareMode = config.config.keychip.software_key;
+            } else if (config.config.keychip.serial_port) {
+                _publish_config.port = config.config.keychip.serial_port;
+            }
+            if (config.config.keychip.asr) {
+                _publish_config.asrState = resolve(join(config.preboot_dir, "\\preboot_Data\\StreamingAssets", "\\state.txt"));
+                _publish_config.asrConfig = resolve(join(config.preboot_dir, "\\preboot_Data\\StreamingAssets", "\\current_config.txt"));
+                _publish_config.asrErrors = resolve(join(config.preboot_dir, "\\preboot_Data\\StreamingAssets", "\\config_errors.txt"));
+            }
+        }
         return _publish_config;
     } else {
         return undefined;
@@ -168,6 +192,102 @@ function generateHarunaConfig() {
     }
 }
 
+async function killRunningApplications() {
+    const current_bc = getCurrentBookcase();
+    if (current_bc) {
+        let proc_names = []
+        if (config.stop_processes)
+            proc_names.push(...config.stop_processes);
+        if (current_bc.stop_processes)
+            proc_names.push(...current_bc.stop_processes);
+        if (proc_names.length > 0) {
+            const processes = await snapshot('pid', 'name');
+            await Promise.all(processes.filter(p => proc_names.includes(p.name.toLowerCase())).map(p => {
+                try {
+                    process.kill(p.pid);
+                    console.log(`Killed process: ${p.name}`);
+                } catch (e) {
+                    console.error(e.message);
+                }
+            }))
+        }
+    }
+}
+function waitForKeychipCheckout() {
+    return new Promise((resolve, reject) => {
+        if (keychip_process) {
+            keychip_process.on('exit', (code) => {
+                console.log(`Process ${keychip_process.pid} exited with code ${code}`);
+                application_armed = false;
+                resolve();
+            });
+        } else {
+            resolve();
+        }
+    });
+}
+
+async function startLifecycle() {
+    const prebootPath = resolve(join(config.preboot_dir, "\\preboot.exe"));
+    if (!(prebootPath && fs.existsSync(prebootPath))) {
+        return ["No Bootloader", false];
+    } else if (preboot_process) {
+        return ["Bootloader Already Running", false];
+    } else {
+        if (config.config && config.config.preboot && config.config.preboot.task_name) {
+            exec(`schtasks /run /tn ${config.config.preboot.task_name}`, (e, stdout, stderr) => {
+                if (e) {
+                    console.error(e.message)
+                }
+            });
+        } else {
+            let args = [];
+            if (parseInt((release()).split('.').pop()) >= 22000)
+                args.push('/machine:amd64')
+            args.push('/trustlevel:0x20000');
+            args.push(`"${prebootPath}"`);
+            preboot_process = spawn('runas', args, {
+                cwd: resolve(config.preboot_dir),
+                detached: true,
+                stdio: 'ignore'
+            });
+        }
+        return ["Started Bootloader", true]
+    }
+}
+async function stopLifecycle() {
+    if (application_armed) {
+        await new Promise((ok) => {
+            request(`http://localhost:6789/terminate`, async (error, response, body) => {
+                if (!error && response.statusCode === 200)
+                    console.log("Keychip Response: " + body.toString());
+                ok();
+            })
+        })
+        await killRunningApplications();
+    } else if (keychip_process !== null) {
+        exec('taskkill /pid ' + keychip_process.pid + ' /T /F');
+    }
+    await waitForKeychipCheckout();
+    if (preboot_process) {
+        exec('taskkill /pid ' + preboot_process.pid + ' /T /F');
+    } else {
+        exec('taskkill /F /IM preboot.exe');
+    }
+    keychip_process = null;
+    preboot_process = null;
+    application_armed = false;
+}
+async function restartIfNeeded() {
+    if (application_armed) {
+        await stopLifecycle();
+        return await startLifecycle();
+    } else {
+        return ["Not Running", true]
+    }
+}
+
+
 app.get("/lcc/bookcase", (req, res) => {
     const current_bc = getCurrentBookcase();
     res.status(200).json(current_bc);
@@ -180,7 +300,7 @@ app.get("/lcc/bookcase/key", (req, res) => {
     const current_bc = getCurrentBookcase();
     res.status(200).send(current_bc.key.toString());
 });
-app.get("/lcc/bookcase/set", (req, res) => {
+app.get("/lcc/bookcase/set", async (req, res) => {
     let found_shelf = [];
     if (req.query.id) {
         const bookcases = getBookshelfs();
@@ -223,11 +343,13 @@ app.get("/lcc/bookcase/set", (req, res) => {
     if (found_shelf.length > 0) {
         state['select_bookcase'] = found_shelf[0].key;
         saveState();
+        const needed_restart = await restartIfNeeded()
         res.status(200).json({
             state: true,
             message: "Changed Bookcase",
             id: found_shelf[0].id || null,
             name: found_shelf[0].name || "Unnamed Bookself",
+            lc_state: needed_restart[0]
         })
     }
 });
@@ -313,6 +435,21 @@ app.get("/lcc/overlay/state/:set", (req, res) => {
     })
 });
 
+app.get("/lcc/debugger/state", (req, res) => {
+    res.status(200).send((state['enable_debugger']).toString())
+});
+app.get("/lcc/debugger/state/:set", (req, res) => {
+    state['enable_debugger'] = (req.params.set === "on");
+    saveState();
+    res.status(200).json({
+        state: state['enable_debugger'],
+        message: "Saved Debugger Setting",
+    })
+});
+
+let preboot_process = null;
+let keychip_process = null;
+let application_armed = false;
 app.get("/lce/kongou", (req, res) => {
     const bookcase = getCurrentBookcase();
     const current_bc = generateIonaConfig(bookcase);
@@ -326,28 +463,72 @@ app.get("/lce/kongou", (req, res) => {
 
     res.status(200).send(name)
 })
+app.get("/lce/kongou/init", async (req, res) => {
+    try {
+        const response = await startLifecycle();
+        res.status((response[1]) ? 200 : 500).send(response[0]);
+    } catch (error) {
+        console.error(error);
+        res.status(500).send(error.message);
+    }
+});
 app.get("/lce/kongou/start", async (req, res) => {
     try {
         const keychipPath = resolve(join(config.system_dir, config.drivers.keychip));
         const ionaBootJsonPath = resolve(join(config.ramdisk_dir, "\\iona.boot.json"));
-        const displayStatePath = resolve(join(config.preboot_dir, "\\preboot_Data\\StreamingAssets", "\\state.txt"));
-        const configStatePath = resolve(join(config.preboot_dir, "\\preboot_Data\\StreamingAssets", "\\current_config.txt"));
-        const configErrorsPath = resolve(join(config.preboot_dir, "\\preboot_Data\\StreamingAssets", "\\config_errors.txt"));
 
-        // Launching the executable in a new window
-        const childProcess = spawn('start', ['minimized', keychipPath,
-            '--env', ionaBootJsonPath,
-            '--displayState', displayStatePath,
-            '--configState', configStatePath,
-            '--configErrors', configErrorsPath
-        ], {
-            detached: true,
-            stdio: 'ignore',
-            shell: true
-        });
-
-        childProcess.unref(); // Allow the parent process to exit independently
-        res.status(200).send("Boot Started");
+        if (!(keychipPath && fs.existsSync(keychipPath))) {
+            res.status(500).send("No Keychip Driver");
+        } else if (!(ionaBootJsonPath && fs.existsSync(ionaBootJsonPath))) {
+            res.status(500).send("No Game Configuration");
+        } else if (keychip_process) {
+            res.status(500).send("Keychip Already Running");
+        } else {
+            application_armed = true;
+            keychip_process = spawn(keychipPath, ['--env', ionaBootJsonPath], {
+                windowsHide: true,
+                stdio: 'ignore'
+            });
+            res.status(200).send("Keychip Started");
+        }
+    } catch (error) {
+        console.error(error);
+        res.status(500).send(error.message);
+    }
+});
+app.get("/lce/kongou/stop", async (req, res) => {
+    try {
+        await stopLifecycle();
+        res.status(200).send("Lifecycle Stopped");
+    } catch (error) {
+        console.error(error);
+        res.status(500).send(error.message);
+    }
+});
+app.get("/lce/kongou/restart", async (req, res) => {
+    try {
+        await stopLifecycle();
+        const response = await startLifecycle();
+        res.status((response[1]) ? 200 : 500).send(response[0]);
+    } catch (error) {
+        console.error(error);
+        res.status(500).send(error.message);
+    }
+});
+app.get("/lce/kongou/estop", async (req, res) => {
+    try {
+        killRunningApplications();
+        if (keychip_process)
+            exec('taskkill /pid ' + keychip_process.pid + ' /T /F');
+        if (preboot_process) {
+            exec('taskkill /pid ' + preboot_process.pid + ' /T /F');
+        } else {
+            exec('taskkill /F /IM preboot.exe');
+        }
+        keychip_process = null;
+        preboot_process = null;
+        application_armed = false;
+        res.status(200).send("Lifecycle Stopped");
     } catch (error) {
         console.error(error);
         res.status(500).send(error.message);

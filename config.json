@@ -16,9 +16,18 @@
     "network_install": "net_prepare.ps1",
     "network_remove": "net_cleanup.ps1"
   },
+  "stop_processes": [
+    "inject.exe"
+  ],
   "config": {
+    "use_keystore": true,
+    "mcu": {
+      "ip_address": "192.168.100.197"
+    },
     "keychip": {
-
+      "serial_port": "COM5",
+      "software_key": false,
+      "asr": true
     },
     "network": "C:\\SEGA\\system\\net_config.json"
   }
