@@ -62,7 +62,7 @@ async function pullBookcaseID() {
                             const bookcases = getBookshelfs();
                             if (bookcases) {
                                 const found_shelf = bookcases.filter(e => e.id && e.id.toString() === id);
-                                if (found_shelf.length === 0) {
+                                if (found_shelf.length !== 0) {
                                     state['select_bookcase'] = found_shelf[0].key;
                                     saveState();
                                     ok(found_shelf[0].key);
