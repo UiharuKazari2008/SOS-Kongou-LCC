@@ -61,7 +61,7 @@ async function pullBookcaseID() {
                         if (!isNaN(id)) {
                             const bookcases = getBookshelfs();
                             if (bookcases) {
-                                const found_shelf = bookcases.filter(e => e.id && e.id.toString() === id);
+                                const found_shelf = bookcases.filter(e => e.id && e.id.toString() === id.toString());
                                 if (found_shelf.length !== 0) {
                                     state['select_bookcase'] = found_shelf[0].key;
                                     saveState();
@@ -517,7 +517,7 @@ app.get("/lce/kongou", async (req, res) => {
 app.get("/lce/kongou/pull_id", async (req, res) => {
     try {
         const response = await pullBookcaseID();
-        res.status((response) ? 200 : 500).send("ID returned was" + response);
+        res.status((response) ? 200 : 500).send("ID returned was = " + response);
     } catch (error) {
         console.error(error);
         res.status(500).send(error.message);
