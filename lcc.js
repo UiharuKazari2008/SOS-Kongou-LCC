@@ -49,6 +49,51 @@ setInterval(() => {
     process.title = `ARS NOVA KONGOU Lifecycle Controller`;
 }, 100);
 
+async function pullBookcaseID() {
+    try {
+        if (config.config && config.config.mcu && (config.config.mcu.ip_address || config.config.mcu.mcu_link) && config.config.mcu.pull_id) {
+            return await new Promise((ok) => {
+                request((config.config.mcu.mcu_link) ? `http://127.0.0.1:6833/mcu_link/${config.config.mcu.mcu_link_command || "game_id"}`: `http://${config.config.mcu.ip_address}/select/game_id`, {
+                    timeout: 5000
+                }, async (error, response, body) => {
+                    if (!error && response.statusCode === 200) {
+                        const id = parseInt(body.toString());
+                        if (!isNaN(id)) {
+                            const bookcases = getBookshelfs();
+                            if (bookcases) {
+                                const found_shelf = bookcases.filter(e => e.id && e.id.toString() === id);
+                                if (found_shelf.length === 0) {
+                                    state['select_bookcase'] = found_shelf[0].key;
+                                    saveState();
+                                    ok(found_shelf[0].key);
+                                } else {
+                                    console.error(`Returned Bookcase ID ${id} does not exist!`);
+                                    ok(undefined);
+                                }
+                            } else {
+                                console.error(`Unable to load bookcase library!`);
+                                ok(undefined);
+                            }
+                        } else {
+                            console.error(`Returned Bookcase ID "${body.toString()}" is not a valid integer!`);
+                            ok(undefined);
+                        }
+                    } else {
+                        if (error)
+                            console.error(error);
+                        ok(undefined);
+                    }
+                })
+            })
+        } else {
+            return undefined
+        }
+    } catch (e) {
+        console.error("Failed to read bookcases: ", e)
+        return undefined;
+    }
+}
+
 async function saveState() {
     try {
         fs.writeFileSync(config.state_file || './state.json', JSON.stringify(state, undefined, 1), {
@@ -77,7 +122,7 @@ function getBookshelfs() {
         return undefined;
     }
 }
-function getCurrentBookcase() {
+async function getCurrentBookcase() {
     try {
         const bookcases = JSON.parse(fs.readFileSync(config.bookcase_file || './bookcase.json').toString());
         if (bookcases.shelfs && bookcases.shelfs[state.select_bookcase]) {
@@ -112,8 +157,8 @@ function getCurrentBookcase() {
     }
 }
 
-function generateIonaConfig(data = undefined) {
-    const current_bc = (data || getCurrentBookcase());
+async function generateIonaConfig(data = undefined) {
+    const current_bc = (data || await getCurrentBookcase());
     if (current_bc) {
         let _publish_config = {
             lifecycle_controller: true,
@@ -175,11 +220,11 @@ function generateIonaConfig(data = undefined) {
         return undefined;
     }
 }
-function generateHarunaConfig() {
+async function generateHarunaConfig() {
     try {
         if (config.config && config.config.network) {
             const network_config = JSON.parse(fs.readFileSync(resolve((config.config.network.includes(':\\') ? config.config.network : join(config.system_dir, config.config.network)))).toString());
-            let current_config = getCurrentBookcase();
+            let current_config = await getCurrentBookcase();
             if (!network_config.login)
                 network_config.login = {};
             if (network_config.login && state['networking_group'])
@@ -197,7 +242,7 @@ function generateHarunaConfig() {
 }
 
 async function killRunningApplications() {
-    const current_bc = getCurrentBookcase();
+    const current_bc = await getCurrentBookcase();
     if (current_bc) {
         let proc_names = []
         if (config.stop_processes)
@@ -294,16 +339,16 @@ async function restartIfNeeded() {
 }
 
 
-app.get("/lcc/bookcase", (req, res) => {
-    const current_bc = getCurrentBookcase();
+app.get("/lcc/bookcase", async (req, res) => {
+    const current_bc = await getCurrentBookcase();
     res.status(200).json(current_bc);
 });
-app.get("/lcc/bookcase/id", (req, res) => {
-    const current_bc = getCurrentBookcase();
+app.get("/lcc/bookcase/id", async (req, res) => {
+    const current_bc = await getCurrentBookcase();
     res.status(200).send(current_bc.id.toString());
 });
-app.get("/lcc/bookcase/key", (req, res) => {
-    const current_bc = getCurrentBookcase();
+app.get("/lcc/bookcase/key", async (req, res) => {
+    const current_bc = await getCurrentBookcase();
     res.status(200).send(current_bc.key.toString());
 });
 app.get("/lcc/bookcase/set", async (req, res) => {
@@ -456,9 +501,9 @@ app.get("/lcc/debugger/state/:set", (req, res) => {
 let preboot_process = null;
 let keychip_process = null;
 let application_armed = false;
-app.get("/lce/kongou", (req, res) => {
-    const bookcase = getCurrentBookcase();
-    const current_bc = generateIonaConfig(bookcase);
+app.get("/lce/kongou", async (req, res) => {
+    const bookcase = await getCurrentBookcase();
+    const current_bc = await generateIonaConfig(bookcase);
     let name = ""
     name += ((current_bc.id) ? (current_bc.id.toString() + " // ") : "")
     name += ((bookcase.name) ? bookcase.name : bookcase.id) + " // "
@@ -469,6 +514,15 @@ app.get("/lce/kongou", (req, res) => {
 
     res.status(200).send(name)
 })
+app.get("/lce/kongou/pull_id", async (req, res) => {
+    try {
+        const response = await pullBookcaseID();
+        res.status((response) ? 200 : 500).send("ID returned was" + response);
+    } catch (error) {
+        console.error(error);
+        res.status(500).send(error.message);
+    }
+});
 app.get("/lce/kongou/init", async (req, res) => {
     try {
         const response = await startLifecycle();
@@ -541,8 +595,8 @@ app.get("/lce/kongou/estop", async (req, res) => {
     }
 });
 
-app.get("/lce/iona/config.json", (req, res) => {
-    const current_bc = generateIonaConfig();
+app.get("/lce/iona/config.json", async (req, res) => {
+    const current_bc = await generateIonaConfig();
     if (current_bc) {
         res.status(200).json(current_bc);
     } else {
@@ -552,8 +606,8 @@ app.get("/lce/iona/config.json", (req, res) => {
         })
     }
 });
-app.get("/lce/ramdisk/write/iona", (req, res) => {
-    const current_bc = generateIonaConfig();
+app.get("/lce/ramdisk/write/iona", async (req, res) => {
+    const current_bc = await generateIonaConfig();
     if (config.ramdisk_dir && current_bc) {
         fs.writeFile(resolve(join(config.ramdisk_dir, "\\iona.boot.json")), JSON.stringify(current_bc), {
             encoding: "utf8"
@@ -580,8 +634,8 @@ app.get("/lce/ramdisk/write/iona", (req, res) => {
     }
 });
 
-app.get("/lce/haruna/config.json", (req, res) => {
-    const current_bc = generateHarunaConfig();
+app.get("/lce/haruna/config.json", async (req, res) => {
+    const current_bc = await generateHarunaConfig();
     if (current_bc) {
         res.status(200).json(current_bc);
     } else {
@@ -591,8 +645,8 @@ app.get("/lce/haruna/config.json", (req, res) => {
         })
     }
 });
-app.get("/lce/ramdisk/write/haruna", (req, res) => {
-    const current_bc = generateHarunaConfig();
+app.get("/lce/ramdisk/write/haruna", async (req, res) => {
+    const current_bc = await generateHarunaConfig();
     if (config.ramdisk_dir && current_bc) {
         fs.writeFile(resolve(join(config.ramdisk_dir, "\\haruna.config.json")), JSON.stringify(current_bc), {
             encoding: "utf8"
