@@ -240,6 +240,25 @@ async function generateHarunaConfig() {
         return undefined;
     }
 }
+async function generateRuntimeOptionsConfig() {
+    try {
+        const current_bc = await getCurrentBookcase();
+        if (current_bc && current_bc.config && current_bc.config.accept_options && current_bc.config.accept_options.length > 0) {
+            let rtopts = {};
+            current_bc.config.accept_options.map(e => {
+                if (state['runtime_options'][e.toString().toLowerCase()]) {
+                    rtopts[e.toString().toLowerCase()] = state['runtime_options'][e.toString().toLowerCase()]
+                }
+            })
+            return rtopts;
+        } else {
+            return {};
+        }
+    }catch (e) {
+        console.error("Failed to read bookcases: ", e)
+        return undefined;
+    }
+}
 
 async function killRunningApplications() {
     const current_bc = await getCurrentBookcase();
@@ -442,6 +461,31 @@ app.get("/lcc/bookcase/eject", async (req, res) => {
         console.error(error);
         res.status(500).send(error.message);
     }
+});
+
+app.get("/lcc/options/:key", (req, res) => {
+    if (state['runtime_options'] && state['runtime_options'][req.params.key.toString().toLowerCase()] !== undefined) {
+        res.status(200).send((state['runtime_options'][req.params.key.toString().toLowerCase()]).toString())
+    } else {
+        res.status(404).send("Not Found");
+    }
+
+});
+app.get("/lcc/options/:key/:set", (req, res) => {
+    if (!state['runtime_options'])
+        state['runtime_options'] = {};
+    if (req.params.set.toString().toLowerCase() === 'true' || req.params.set.toString().toLowerCase() === 'false') {
+        state['runtime_options'][req.params.key.toString().toLowerCase()] = (req.params.set.toString().toLowerCase() === 'true');
+    } else {
+        state['runtime_options'][req.params.key.toString().toLowerCase()] = req.params.set.toString();
+    }
+    saveState();
+    res.status(200).json({
+        state: true,
+        key: req.params.key.toString(),
+        value: state['runtime_options'][req.params.key.toString().toLowerCase()],
+        message: "Saved Option Setting",
+    })
 });
 
 app.get("/lcc/network/state", (req, res) => {
@@ -660,6 +704,45 @@ app.get("/lce/ramdisk/write/haruna", async (req, res) => {
                 res.status(500).json({
                     state: false,
                     message: "Haruna Configuration failed to save to RamDisk",
+                    error_message: err.message
+                });
+            }
+        })
+
+    } else {
+        res.status(500).json({
+            state: false,
+            message: "Unable to retrieve or save configuration",
+        })
+    }
+});
+
+app.get("/lce/rtopts/config.json", async (req, res) => {
+    const current_bc = await generateRuntimeOptionsConfig();
+    if (current_bc) {
+        res.status(200).json(current_bc);
+    } else {
+        res.status(500).json({
+            state: false,
+            message: "Unable to retrieve configuration",
+        })
+    }
+});
+app.get("/lce/ramdisk/write/rtopts", async (req, res) => {
+    const current_bc = await generateRuntimeOptionsConfig();
+    if (config.ramdisk_dir && current_bc) {
+        fs.writeFile(resolve(join(config.ramdisk_dir, "\\runtime_options.config.json")), JSON.stringify(current_bc), {
+            encoding: "utf8"
+        }, (err) => {
+            if (!err) {
+                res.status(200).json({
+                    state: true,
+                    message: "Runtime Options Configuration saved to RamDisk",
+                });
+            } else {
+                res.status(500).json({
+                    state: false,
+                    message: "Runtime Options failed to save to RamDisk",
                     error_message: err.message
                 });
             }
