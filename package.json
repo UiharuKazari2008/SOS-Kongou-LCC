@@ -15,7 +15,8 @@
     "express": "^4.19.2",
     "node-powershell": "^5.0.1",
     "process-list": "^2.0.0",
-    "request": "^2.88.2"
+    "request": "^2.88.2",
+    "yargs": "^17.7.2"
   },
   "bin": "lcc.js",
   "pkg": {
@@ -24,7 +25,8 @@
     ],
     "output": "kongou_lifecycle_ctrl",
     "assets": [
-      "node_modules/process-list/**/*"
+      "node_modules/process-list/**/*",
+      "JOB_SOS_APP.xml"
     ],
     "targets": [
       "node16-win-x64"
