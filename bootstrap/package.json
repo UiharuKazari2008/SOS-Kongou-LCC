@@ -1,8 +1,8 @@
 {
-  "name": "sos-kongou-lcc",
+  "name": "sos-kongou-bootstrap",
   "version": "1.0.0",
   "description": "",
-  "main": "lcc.js",
+  "main": "bootstrap.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"
   },
@@ -19,20 +19,20 @@
     "terminal-kit": "^3.1.1",
     "yargs": "^17.7.2"
   },
-  "bin": "lcc.js",
+  "bin": "bootstrap.js",
   "pkg": {
     "scripts": [
-      "lcc.js"
+      "bootstrap.js"
     ],
-    "output": "kongou_lifecycle_ctrl",
+    "output": "kongou_lifecycle_bootstrap",
     "assets": [
+      "images/**/*",
       "node_modules/process-list/**/*",
-      "node_modules/terminal-kit/lib/**/*",
-      "JOB_SOS_APP.xml"
+      "node_modules/terminal-kit/lib/**/*"
     ],
     "targets": [
       "node16-win-x64"
     ],
-    "outputPath": "build/"
+    "outputPath": "../build/"
   }
 }
